@@ -32,11 +32,12 @@ class JournalEntrySerializer(serializers.ModelSerializer):
     likes_count = serializers.IntegerField(source='likes.count', read_only=True)
     comments = CommentSerializer(many=True, read_only=True)
     tags = serializers.PrimaryKeyRelatedField(queryset=Tag.objects.all(), many=True)
+    likes = serializers.PrimaryKeyRelatedField(many=True, read_only=True)  # New field to show user IDs of likes
 
     class Meta:
         model = JournalEntry
         fields = [
-            'id', 'user_id', 'title', 'content', 'tags', 'status', 'likes_count', 
+            'id', 'user_id', 'title', 'content', 'tags', 'status', 'likes_count', 'likes',
             'created_at', 'updated_at', 'character_name', 'campaign_title', 
             'session_number', 'location', 'mood', 'privacy_level', 
             'related_quest', 'word_count', 'comments'
