@@ -2,7 +2,7 @@ from rest_framework import serializers, viewsets, filters
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.decorators import action
 from rest_framework.response import Response
-from ..models.models import JournalEntry, Comment, Tag
+from ..models.models import JournalEntry, Comment, Tag, Notification  # Make sure to import Notification
 from django.db.models import Q
 
 # Comment Serializer
@@ -32,7 +32,7 @@ class JournalEntrySerializer(serializers.ModelSerializer):
     likes_count = serializers.IntegerField(source='likes.count', read_only=True)
     comments = CommentSerializer(many=True, read_only=True)
     tags = serializers.PrimaryKeyRelatedField(queryset=Tag.objects.all(), many=True)
-    likes = serializers.PrimaryKeyRelatedField(many=True, read_only=True)  # New field to show user IDs of likes
+    likes = serializers.PrimaryKeyRelatedField(many=True, read_only=True)
 
     class Meta:
         model = JournalEntry
@@ -51,8 +51,8 @@ class JournalEntryViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
 
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
-    search_fields = ['title', 'character_name', 'campaign_title']  # Fields to search
-    ordering_fields = ['created_at', 'title']  # Fields to order by
+    search_fields = ['title', 'character_name', 'campaign_title']
+    ordering_fields = ['created_at', 'title']
 
     def get_queryset(self):
         queryset = super().get_queryset()
@@ -63,7 +63,6 @@ class JournalEntryViewSet(viewsets.ModelViewSet):
             Q(privacy_level="public") | Q(user=user)
         )
 
-        # Additional filtering by user if 'user_only=true' is passed
         user_only = self.request.query_params.get('user_only', None)
         if user_only and user_only.lower() == 'true':
             queryset = queryset.filter(user=user)
@@ -71,7 +70,6 @@ class JournalEntryViewSet(viewsets.ModelViewSet):
         return queryset
 
     def perform_create(self, serializer):
-        # Automatically save journal entry with the logged-in user
         journal_entry = serializer.save(user=self.request.user)
 
     @action(detail=True, methods=['post'], permission_classes=[IsAuthenticated])
@@ -79,13 +77,17 @@ class JournalEntryViewSet(viewsets.ModelViewSet):
         journal_entry = self.get_object()
         user = request.user
 
-        # Check if the user already liked the journal
         if journal_entry.likes.filter(id=user.id).exists():
-            # If already liked, remove the like (unlike)
             journal_entry.likes.remove(user)
         else:
-            # Otherwise, add the like
             journal_entry.likes.add(user)
+
+            # Create a notification for the like
+            Notification.objects.create(
+                user=journal_entry.user,  # The user who owns the journal entry
+                notification_type='like',
+                journal_entry=journal_entry
+            )
 
         return Response({'status': 'like toggled'})
 
@@ -101,6 +103,15 @@ class JournalEntryViewSet(viewsets.ModelViewSet):
             author=request.user,
             content=comment_content
         )
+
+        # Create a notification for the comment
+        Notification.objects.create(
+            user=journal_entry.user,  # The user who owns the journal entry
+            notification_type='comment',
+            journal_entry=journal_entry,
+            comment=comment  # Link the comment to the notification
+        )
+        
         return Response(CommentSerializer(comment).data, status=201)
 
 

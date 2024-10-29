@@ -8,7 +8,7 @@ from rest_framework.authentication import TokenAuthentication
 from django.http import HttpResponse, HttpResponseNotAllowed, JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.contrib.auth import authenticate
-from QuestScribeapi.models import Profile
+from QuestScribeapi.models import Profile, Notification
 import json
 
 # User and Profile Serializers
@@ -34,11 +34,11 @@ class UserSerializer(serializers.ModelSerializer):
 class ProfileSerializer(serializers.ModelSerializer):
     username = serializers.CharField(source='user.username', read_only=True)
     email = serializers.EmailField(source='user.email', read_only=True)
-    date_joined = serializers.DateTimeField(source='user.date_joined', read_only=True)  # Add this line
+    date_joined = serializers.DateTimeField(source='user.date_joined', read_only=True)
 
     class Meta:
         model = Profile
-        fields = ['id', 'username', 'email', 'display_name', 'bio', 'profile_photo', 'role','user_id', 'date_joined']  # Include role
+        fields = ['id', 'username', 'email', 'display_name', 'bio', 'profile_photo', 'role', 'user_id', 'date_joined']
 
 
 class UpdateProfileSerializer(serializers.ModelSerializer):
@@ -46,11 +46,11 @@ class UpdateProfileSerializer(serializers.ModelSerializer):
         model = Profile
         fields = ['display_name', 'bio', 'profile_photo', 'role']  # Allow updating of role
 
+
 class UserListView(generics.ListAPIView):
     queryset = User.objects.all()
     serializer_class = UserSerializer
 
-# Views
 
 class UserCreateView(generics.CreateAPIView):
     queryset = User.objects.all()
@@ -74,20 +74,14 @@ class ProfileView(APIView):
             return Response(serializer.data)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-# Login and Registration Views
 
 @csrf_exempt
 def login_user(request):
-    '''Handles the authentication of a user'''
     if request.method == 'POST':
         try:
             body = request.body.decode('utf-8')
             req_body = json.loads(body)
 
-            # Log username and password for debugging
-            print(f"Username: {req_body.get('username')}, Password: {req_body.get('password')}")
-
-            # Authenticate user
             name = req_body['username']
             pass_word = req_body['password']
             authenticated_user = authenticate(username=name, password=pass_word)
@@ -106,17 +100,14 @@ def login_user(request):
 
 @csrf_exempt
 def register_user(request):
-    '''Handles user registration'''
     if request.method == 'POST':
         try:
             req_body = json.loads(request.body.decode())
 
-            # Validate required fields
             required_fields = ['username', 'email', 'password', 'first_name', 'last_name']
             if not all(field in req_body for field in required_fields):
                 return JsonResponse({"error": "Missing required fields"}, status=400)
 
-            # Create new user
             new_user = User.objects.create_user(
                 username=req_body['username'],
                 email=req_body['email'],
@@ -134,14 +125,72 @@ def register_user(request):
 
     return HttpResponseNotAllowed(['POST'])
 
-from rest_framework import generics
 
 class UserProfileView(generics.RetrieveAPIView):
     queryset = Profile.objects.all()
     serializer_class = ProfileSerializer
 
     def get_object(self):
-        # Get the user ID from the URL
         user_id = self.kwargs['pk']  # Use 'pk' if your URL captures the ID as pk
-        # Return the Profile object related to that user
         return Profile.objects.get(user_id=user_id)
+
+
+# Following and Unfollowing Users
+class FollowView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, user_id):
+        try:
+            followed_user = User.objects.get(pk=user_id)
+            if request.user.profile.following.filter(pk=followed_user.id).exists():
+                return Response({"error": "You are already following this user."}, status=400)
+            
+            # Follow the user
+            request.user.profile.following.add(followed_user.profile)
+
+            # Create a notification for the followed user
+            Notification.objects.create(
+                user=followed_user,
+                notification_type='follow'
+            )
+
+            return Response({"success": f"You are now following {followed_user.username}"}, status=201)
+
+        except User.DoesNotExist:
+            return Response({"error": "User not found."}, status=404)
+
+    def delete(self, request, user_id):
+        try:
+            followed_user = User.objects.get(pk=user_id)
+            request.user.profile.following.remove(followed_user.profile)
+            return Response({"success": f"You have unfollowed {followed_user.username}"}, status=204)
+
+        except User.DoesNotExist:
+            return Response({"error": "User not found."}, status=404)
+
+
+class NotificationSerializer(serializers.ModelSerializer):
+    journal_entry_title = serializers.CharField(source='journal_entry.title', read_only=True)
+    comment_content = serializers.CharField(source='comment.content', read_only=True)
+
+    class Meta:
+        model = Notification
+        fields = ['id', 'user', 'notification_type', 'journal_entry', 'journal_entry_title', 'comment', 'comment_content', 'created_at', 'is_read']
+
+
+
+class NotificationListView(generics.ListAPIView):
+    permission_classes = [IsAuthenticated]
+    serializer_class = NotificationSerializer
+
+    def get_queryset(self):
+        user = self.request.user
+        return Notification.objects.filter(user=user).order_by('-created_at')
+    
+class NotificationDetailView(generics.DestroyAPIView):
+    queryset = Notification.objects.all()
+    permission_classes = [IsAuthenticated]
+
+    def get_object(self):
+        notification_id = self.kwargs['pk']
+        return super().get_object()

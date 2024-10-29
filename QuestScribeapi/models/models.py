@@ -77,6 +77,25 @@ class Profile(models.Model):
     bio = models.TextField()
     profile_photo = models.FileField(upload_to='profile_photos/', blank=True, null=True)
     role = models.CharField(max_length=10, choices=USER_ROLES, default='reader')  # Add a role field with choices
+    
+    # New field for following other users
+    following = models.ManyToManyField('self', symmetrical=False, related_name='followers', blank=True)
 
     def __str__(self):
         return self.user.username
+class Notification(models.Model):
+    NOTIFICATION_TYPES = [
+        ('like', 'Like'),
+        ('comment', 'Comment'),
+        # Add other types if needed
+    ]
+
+    user = models.ForeignKey(User, on_delete=models.CASCADE)  # User receiving the notification
+    notification_type = models.CharField(max_length=10, choices=NOTIFICATION_TYPES)
+    journal_entry = models.ForeignKey(JournalEntry, on_delete=models.CASCADE, null=True, blank=True)  # Journal entry related to the notification
+    comment = models.ForeignKey(Comment, on_delete=models.CASCADE, null=True, blank=True)  # Comment related to the notification
+    created_at = models.DateTimeField(auto_now_add=True)  # Timestamp of the notification
+    is_read = models.BooleanField(default=False)  # Status if the notification has been read
+
+    def __str__(self):
+        return f"{self.user.username} - {self.notification_type}"
